@@ -63,8 +63,8 @@
     <div class="flex-1 relative h-full">
         <div id="map" class="w-full h-full bg-gray-200"></div>
 
-        <!-- Search Bar -->
-        <div class="absolute top-4 left-16 right-16 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-96 z-[400]">
+        <!-- Search Bar (Mặc định ẩn, có ID để toggle) -->
+        <div id="search-container" class="absolute top-4 left-16 right-16 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-96 z-[400] hidden transition-all duration-300 origin-top">
              <div class="relative shadow-lg rounded-full group">
                 <input type="text" id="search-input" 
                        class="w-full pl-10 pr-4 py-3 rounded-full border-none focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white/95 backdrop-blur transition-colors"
@@ -83,6 +83,10 @@
             </button>
             <button onclick="app.locateMe()" class="bg-blue-600 p-3 rounded-full shadow-lg hover:bg-blue-700 text-white transition" title="Vị trí của tôi">
                 <i data-lucide="locate" class="w-6 h-6"></i>
+            </button>
+            <!-- Nút Toggle Search mới -->
+            <button onclick="app.toggleSearch()" class="bg-white p-3 rounded-full shadow-lg hover:bg-gray-100 text-gray-700 transition" title="Tìm kiếm">
+                <i data-lucide="search" class="w-6 h-6"></i>
             </button>
             <button onclick="app.clearRoute()" class="bg-red-500 p-3 rounded-full shadow-lg hover:bg-red-600 text-white transition hidden" id="btn-clear-route" title="Xóa tuyến đường">
                 <i data-lucide="x-circle" class="w-6 h-6"></i>
@@ -242,6 +246,17 @@
             }
 
             // --- SEARCH FUNCTION ---
+            toggleSearch() {
+                const el = document.getElementById('search-container');
+                if (el) {
+                    el.classList.toggle('hidden');
+                    if (!el.classList.contains('hidden')) {
+                        const inp = document.getElementById('search-input');
+                        if(inp) inp.focus();
+                    }
+                }
+            }
+
             async searchAddress(query) {
                 if (!query) return;
                 const inp = document.getElementById('search-input');
@@ -461,9 +476,15 @@
                 return `
                     <div class="p-4 border-b flex justify-between items-center bg-gray-50">
                         <h1 class="font-bold text-lg text-gray-800">Danh sách trạm (${this.stations.length})</h1>
-                        <button onclick="app.exportCSV()" class="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Xuất Excel/CSV">
-                            <i data-lucide="download" class="w-5 h-5"></i>
-                        </button>
+                        <div class="flex gap-2">
+                            <button onclick="app.exportCSV()" class="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Xuất Excel/CSV">
+                                <i data-lucide="download" class="w-5 h-5"></i>
+                            </button>
+                            <!-- Nút Đóng (Mới) -->
+                            <button onclick="app.toggleSidebar()" class="text-gray-500 hover:bg-red-50 hover:text-red-600 p-2 rounded" title="Đóng">
+                                <i data-lucide="x" class="w-5 h-5"></i>
+                            </button>
+                        </div>
                     </div>
                     <div class="flex-1 overflow-y-auto p-4 bg-gray-100">
                         ${listItems}
@@ -547,15 +568,31 @@
                             <textarea id="inp-desc" required rows="4" class="w-full border rounded p-2 text-sm" placeholder="Mô tả chi tiết..."></textarea>
                         </div>
 
-                        <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded font-medium hover:bg-blue-700 mt-4 flex justify-center gap-2">
-                            <i data-lucide="save" class="w-5 h-5"></i> Lưu Trạm
-                        </button>
+                        <div class="flex gap-3 mt-4">
+                            <button type="button" id="btn-cancel" class="flex-1 bg-gray-200 text-gray-700 py-3 rounded font-medium hover:bg-gray-300 flex justify-center gap-2">
+                                <i data-lucide="x" class="w-5 h-5"></i> Hủy
+                            </button>
+                            <button type="submit" class="flex-1 bg-blue-600 text-white py-3 rounded font-medium hover:bg-blue-700 flex justify-center gap-2">
+                                <i data-lucide="save" class="w-5 h-5"></i> Lưu thông tin
+                            </button>
+                        </div>
                     </form>
                 `;
 
                 // Logic for Form
                 const selReporter = document.getElementById('sel-reporter');
                 const inpReporterNew = document.getElementById('inp-reporter-new');
+                
+                // Xử lý nút Hủy
+                document.getElementById('btn-cancel').onclick = () => {
+                    this.selectedLocation = null;
+                    this.updateTempMarker();
+                    this.setSidebarView('LIST');
+                    if (window.innerWidth < 768) {
+                        this.isSidebarOpen = false;
+                        this.updateSidebarVisibility();
+                    }
+                };
 
                 // Xử lý khi đổi lựa chọn
                 selReporter.onchange = (e) => {
