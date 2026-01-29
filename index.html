@@ -77,7 +77,8 @@
         </div>
 
         <!-- Floating Buttons -->
-        <div class="absolute top-4 right-4 flex flex-col gap-2 z-[400]">
+        <!-- Adjusted top position for mobile (top-24) to clear sidebar header, keep top-4 on desktop -->
+        <div class="absolute top-24 md:top-4 right-4 flex flex-col gap-2 z-[400]">
             <button onclick="app.setSidebarView('SETTINGS')" class="bg-white p-3 rounded-full shadow-lg hover:bg-gray-100 text-gray-700 transition" title="Cài đặt">
                 <i data-lucide="settings" class="w-6 h-6"></i>
             </button>
@@ -127,6 +128,7 @@
                 this.view = 'LIST'; // LIST, FORM, SETTINGS
                 this.selectedLocation = null;
                 this.isSidebarOpen = window.innerWidth >= 768;
+                this.listFilterQuery = ''; // State for list filter
                 
                 // Map References
                 this.map = null;
@@ -419,7 +421,10 @@
 
             setSidebarView(viewName) {
                 this.view = viewName;
-                if (viewName === 'LIST') this.selectedLocation = null;
+                if (viewName === 'LIST') {
+                    this.selectedLocation = null;
+                    this.listFilterQuery = ''; // Reset filter when opening list view
+                }
                 this.updateTempMarker();
                 this.renderSidebar();
             }
@@ -439,15 +444,30 @@
                 lucide.createIcons();
             }
 
-            // HTML Generator: LIST
-            getListViewHTML() {
-                const listItems = this.stations.length === 0 
-                    ? `<div class="text-center text-gray-400 mt-10 p-4">
-                        <i data-lucide="map-pin" class="w-10 h-10 mx-auto opacity-50 mb-2"></i>
-                        <p>Chưa có dữ liệu.</p>
-                        <p class="text-sm">Bấm vào bản đồ để thêm trạm mới.</p>
-                       </div>`
-                    : this.stations.map(s => `
+            // Helper to generate station items HTML
+            getStationItemsHTML() {
+                const query = (this.listFilterQuery || '').toLowerCase().trim();
+                const filteredStations = this.stations.filter(s => {
+                    const name = (s.name || '').toLowerCase();
+                    const reporter = (s.reporter || '').toLowerCase();
+                    return name.includes(query) || reporter.includes(query);
+                });
+
+                if (filteredStations.length === 0) {
+                     if (this.stations.length === 0) {
+                        return `<div class="text-center text-gray-400 mt-10 p-4">
+                            <i data-lucide="map-pin" class="w-10 h-10 mx-auto opacity-50 mb-2"></i>
+                            <p>Chưa có dữ liệu.</p>
+                            <p class="text-sm">Bấm vào bản đồ để thêm trạm mới.</p>
+                        </div>`;
+                     }
+                     return `<div class="text-center text-gray-400 mt-10 p-4">
+                        <i data-lucide="search-x" class="w-10 h-10 mx-auto opacity-50 mb-2"></i>
+                        <p>Không tìm thấy kết quả phù hợp.</p>
+                       </div>`;
+                }
+
+                return filteredStations.map(s => `
                         <div class="border rounded-lg p-3 hover:shadow-md transition bg-white mb-3 group relative cursor-pointer" onclick="app.handleMarkerClick(${JSON.stringify(s).replace(/"/g, '&quot;')})">
                              <div class="flex justify-between items-start">
                                 <div>
@@ -472,22 +492,45 @@
                              </button>
                         </div>
                     `).join('');
+            }
 
+            setListFilter(query) {
+                this.listFilterQuery = query;
+                const container = document.getElementById('station-list-items');
+                if (container) {
+                    container.innerHTML = this.getStationItemsHTML();
+                    lucide.createIcons();
+                }
+            }
+
+            // HTML Generator: LIST
+            getListViewHTML() {
                 return `
-                    <div class="p-4 border-b flex justify-between items-center bg-gray-50">
-                        <h1 class="font-bold text-lg text-gray-800">Danh sách trạm (${this.stations.length})</h1>
-                        <div class="flex gap-2">
-                            <button onclick="app.exportCSV()" class="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Xuất Excel/CSV">
-                                <i data-lucide="download" class="w-5 h-5"></i>
-                            </button>
-                            <!-- Nút Đóng (Mới) -->
-                            <button onclick="app.toggleSidebar()" class="text-gray-500 hover:bg-red-50 hover:text-red-600 p-2 rounded" title="Đóng">
-                                <i data-lucide="x" class="w-5 h-5"></i>
-                            </button>
+                    <div class="p-4 border-b bg-gray-50 space-y-3 sticky top-0 z-10">
+                        <div class="flex justify-between items-center">
+                            <h1 class="font-bold text-lg text-gray-800">Danh sách trạm (${this.stations.length})</h1>
+                            <div class="flex gap-2">
+                                <button onclick="app.exportCSV()" class="text-blue-600 hover:bg-blue-50 p-2 rounded" title="Xuất Excel/CSV">
+                                    <i data-lucide="download" class="w-5 h-5"></i>
+                                </button>
+                                <!-- Nút Đóng -->
+                                <button onclick="app.toggleSidebar()" class="text-gray-500 hover:bg-red-50 hover:text-red-600 p-2 rounded" title="Đóng">
+                                    <i data-lucide="x" class="w-5 h-5"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Bộ lọc danh sách -->
+                        <div class="relative">
+                            <input type="text" 
+                                value="${this.listFilterQuery || ''}"
+                                oninput="app.setListFilter(this.value)"
+                                placeholder="Lọc theo tên trạm hoặc người nhập..." 
+                                class="w-full pl-9 pr-3 py-2 rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white">
+                            <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-2.5"></i>
                         </div>
                     </div>
-                    <div class="flex-1 overflow-y-auto p-4 bg-gray-100">
-                        ${listItems}
+                    <div id="station-list-items" class="flex-1 overflow-y-auto p-4 bg-gray-100">
+                        ${this.getStationItemsHTML()}
                     </div>
                 `;
             }
