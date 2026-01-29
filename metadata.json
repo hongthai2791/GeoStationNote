@@ -1,0 +1,7 @@
+{
+  "name": "GeoStation Note",
+  "description": "A geolocation-based station logger using Google Maps. Users can pin locations, upload photos, auto-generate descriptions using Gemini AI, and export data to Google Sheets.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
