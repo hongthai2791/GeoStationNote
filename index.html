@@ -245,7 +245,29 @@
                         shadowSize: [41, 41]
                     });
 
-                    this.tempMarker = L.marker([this.selectedLocation.lat, this.selectedLocation.lng], { icon: redIcon }).addTo(this.map);
+                    // Cho phép draggable (kéo thả)
+                    this.tempMarker = L.marker([this.selectedLocation.lat, this.selectedLocation.lng], { 
+                        icon: redIcon,
+                        draggable: true 
+                    }).addTo(this.map);
+
+                    // Tooltip hướng dẫn
+                    this.tempMarker.bindTooltip("Kéo để chỉnh vị trí", {direction: 'top', offset: [0, -40]}).openTooltip();
+                    setTimeout(() => this.tempMarker.closeTooltip(), 3000);
+
+                    // Sự kiện khi kéo xong marker
+                    this.tempMarker.on('dragend', (event) => {
+                        const position = event.target.getLatLng();
+                        this.selectedLocation = { lat: position.lat, lng: position.lng };
+                        
+                        // Cập nhật tọa độ trên Form nếu đang mở
+                        const latEl = document.getElementById('disp-lat');
+                        const lngEl = document.getElementById('disp-lng');
+                        if (latEl && lngEl) {
+                            latEl.innerText = `Lat: ${position.lat.toFixed(5)}`;
+                            lngEl.innerText = `Lng: ${position.lng.toFixed(5)}`;
+                        }
+                    });
                 }
             }
 
@@ -583,8 +605,8 @@
                     </div>
                     <form id="station-form" class="p-5 space-y-4 flex-1 overflow-y-auto">
                         <div class="bg-gray-50 p-2 rounded text-xs text-gray-600 flex justify-between">
-                            <span>Lat: ${this.selectedLocation.lat.toFixed(5)}</span>
-                            <span>Lng: ${this.selectedLocation.lng.toFixed(5)}</span>
+                            <span id="disp-lat">Lat: ${this.selectedLocation.lat.toFixed(5)}</span>
+                            <span id="disp-lng">Lng: ${this.selectedLocation.lng.toFixed(5)}</span>
                         </div>
                         
                         <div>
