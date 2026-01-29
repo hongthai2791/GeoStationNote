@@ -2,6 +2,7 @@
   "name": "GeoStation Note",
   "short_name": "GeoStation",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f3f4f6",
   "theme_color": "#2563EB",
