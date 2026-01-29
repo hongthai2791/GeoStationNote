@@ -1,22 +1,94 @@
 {
-  "name": "GeoStation Note",
+  "name": "GeoStation Note - Sổ Tay Trạm",
   "short_name": "GeoStation",
+  "description": "Ứng dụng bản đồ ghi chép trạm, định vị GPS, chụp ảnh hiện trường và xuất báo cáo Excel. Hỗ trợ AI tạo mô tả tự động.",
+  "id": "/",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "minimal-ui"],
+  "orientation": "portrait-primary",
   "background_color": "#f3f4f6",
   "theme_color": "#2563EB",
-  "orientation": "portrait",
+  "lang": "vi",
+  "dir": "ltr",
+  "categories": [
+    "productivity",
+    "utilities",
+    "navigation",
+    "business"
+  ],
   "icons": [
     {
       "src": "https://cdn-icons-png.flaticon.com/512/854/854878.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "https://cdn-icons-png.flaticon.com/512/854/854878.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/854/854878.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/854/854878.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
-  ]
+  ],
+  "screenshots": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/854/854878.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Màn hình bản đồ chính trên điện thoại"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/854/854878.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Giao diện quản lý trên máy tính"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Vị trí của tôi",
+      "short_name": "Định vị",
+      "url": "./index.html?action=locate",
+      "description": "Xem vị trí hiện tại trên bản đồ",
+      "icons": [
+        {
+          "src": "https://cdn-icons-png.flaticon.com/512/854/854878.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Danh sách trạm",
+      "short_name": "Danh sách",
+      "url": "./index.html?action=list",
+      "description": "Xem danh sách các trạm đã lưu",
+      "icons": [
+        {
+          "src": "https://cdn-icons-png.flaticon.com/512/854/854878.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false,
+  "related_applications": [],
+  "iarc_rating_id": ""
 }
