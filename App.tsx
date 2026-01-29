@@ -87,6 +87,8 @@ export default function App() {
           setMapCenter(loc);
           setZoom(15);
           setSelectedLocation(loc); // Auto-select current location for logging
+          if (!isSidebarOpen) setIsSidebarOpen(true);
+          setCurrentView(AppView.MAP);
         },
         () => {
           alert("Could not access your location.");
@@ -261,8 +263,6 @@ export default function App() {
            </div>
         )}
       </div>
-
-      {/* Removed the blocking modal for missing API Key to support free usage */}
     </div>
   );
 }
