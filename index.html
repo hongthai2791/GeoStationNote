@@ -14,9 +14,15 @@
     <!-- Leaflet CSS (Bản đồ miễn phí) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     
+    <!-- Leaflet Routing Machine CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     
+    <!-- Leaflet Routing Machine JS -->
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
@@ -35,6 +41,14 @@
         /* Ẩn thanh cuộn nhưng vẫn cuộn được */
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Tùy chỉnh bảng chỉ đường cho gọn trên mobile */
+        .leaflet-routing-container {
+            max-width: 250px !important;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-900 overflow-hidden h-screen w-screen flex relative">
@@ -57,6 +71,9 @@
             <button onclick="app.locateMe()" class="bg-blue-600 p-3 rounded-full shadow-lg hover:bg-blue-700 text-white transition" title="Vị trí của tôi">
                 <i data-lucide="locate" class="w-6 h-6"></i>
             </button>
+            <button onclick="app.clearRoute()" class="bg-red-500 p-3 rounded-full shadow-lg hover:bg-red-600 text-white transition hidden" id="btn-clear-route" title="Xóa tuyến đường">
+                <i data-lucide="x-circle" class="w-6 h-6"></i>
+            </button>
         </div>
 
         <!-- Sidebar Toggle (Mobile) -->
@@ -73,6 +90,7 @@
         const STORE_KEY_DATA = 'geo_station_data_v1';
         const STORE_KEY_CONFIG = 'geo_station_config_v1';
         const STORE_KEY_LAST_REPORTER = 'geo_station_last_reporter';
+        const STORE_KEY_MAP_VIEW = 'geo_station_map_view'; // Key mới để lưu vị trí bản đồ
 
         class App {
             constructor() {
@@ -85,7 +103,7 @@
                     googleMapsApiKey: this.config.googleMapsApiKey || "",
                     googleSheetScriptUrl: this.config.googleSheetScriptUrl || "",
                     geminiApiKey: this.config.geminiApiKey || "",
-                    customApiUrl: this.config.customApiUrl || "" // New field for Custom API
+                    customApiUrl: this.config.customApiUrl || "" 
                 };
                 
                 this.view = 'LIST'; // LIST, FORM, SETTINGS
@@ -96,6 +114,7 @@
                 this.map = null;
                 this.markers = [];
                 this.tempMarker = null;
+                this.routingControl = null; // Biến lưu control chỉ đường
                 
                 this.init();
             }
@@ -107,25 +126,42 @@
                 lucide.createIcons();
             }
 
-            // --- MAP LOGIC (Leaflet Default) ---
+            // --- MAP LOGIC ---
             initMap() {
-                // Default Ho Chi Minh City (HCM)
-                const startLat = 10.7769;
-                const startLng = 106.7009;
+                // 1. Tải vị trí cuối cùng từ LocalStorage
+                const savedView = JSON.parse(localStorage.getItem(STORE_KEY_MAP_VIEW) || 'null');
+                
+                // Default Ho Chi Minh City (HCM) nếu không có savedView
+                const startLat = savedView ? savedView.lat : 10.7769;
+                const startLng = savedView ? savedView.lng : 106.7009;
+                const startZoom = savedView ? savedView.zoom : 12;
 
                 this.map = L.map('map', { 
                     zoomControl: false,
-                    maxZoom: 12, // Khóa zoom in tối đa là 12
-                    minZoom: 5   // Cho phép zoom out (nhỏ nhất là 5)
-                }).setView([startLat, startLng], 12);
+                    maxZoom: 20, 
+                    minZoom: 5  
+                }).setView([startLat, startLng], startZoom);
                 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '&copy; OpenStreetMap contributors'
                 }).addTo(this.map);
                 L.control.zoom({ position: 'bottomright' }).addTo(this.map);
 
+                // 2. Sự kiện lưu vị trí khi di chuyển/zoom
+                const saveMapState = () => {
+                    const center = this.map.getCenter();
+                    localStorage.setItem(STORE_KEY_MAP_VIEW, JSON.stringify({
+                        lat: center.lat,
+                        lng: center.lng,
+                        zoom: this.map.getZoom()
+                    }));
+                };
+                this.map.on('moveend', saveMapState);
+                this.map.on('zoomend', saveMapState);
+
                 // Click Event
                 this.map.on('click', (e) => {
+                    // Nếu đang có tuyến đường thì không mở form, hoặc tùy logic
                     this.handleMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
                 });
 
@@ -163,7 +199,6 @@
                 }
 
                 if (this.selectedLocation) {
-                    // Simple Red Icon
                     const redIcon = L.icon({
                         iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
                         shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
@@ -181,11 +216,66 @@
                 if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(pos => {
                         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                        // setView sẽ tự động kẹp về maxZoom (12) nếu giá trị > 12
-                        this.map.setView([loc.lat, loc.lng], 12);
-                        this.handleMapClick(loc);
+                        this.map.setView([loc.lat, loc.lng], 16);
+                        
+                        // Tạo hiệu ứng marker tại vị trí tôi
+                        L.circleMarker([loc.lat, loc.lng], {
+                            radius: 6, color: 'white', fillColor: 'green', fillOpacity: 1
+                        }).addTo(this.map).bindPopup("Vị trí của bạn").openPopup();
+
                     }, () => alert("Không thể lấy vị trí của bạn."));
                 }
+            }
+
+            // --- ROUTING FUNCTION (CHỈ ĐƯỜNG) ---
+            routeTo(destLat, destLng) {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(pos => {
+                        const myLat = pos.coords.latitude;
+                        const myLng = pos.coords.longitude;
+
+                        // Xóa route cũ nếu có
+                        this.clearRoute();
+
+                        // Tạo route mới
+                        this.routingControl = L.Routing.control({
+                            waypoints: [
+                                L.latLng(myLat, myLng),
+                                L.latLng(destLat, destLng)
+                            ],
+                            routeWhileDragging: false,
+                            language: 'vi', // Tiếng Việt
+                            showAlternatives: false,
+                            fitSelectedRoutes: true,
+                            lineOptions: {
+                                styles: [{color: '#6366f1', opacity: 0.8, weight: 6}]
+                            },
+                            // Tắt bớt các marker mặc định của LRM để đỡ rối
+                            createMarker: function(i, wp, nWps) {
+                                return null; 
+                            }
+                        }).addTo(this.map);
+
+                        document.getElementById('btn-clear-route').classList.remove('hidden');
+                        
+                        // Đóng sidebar trên mobile để xem bản đồ
+                        if (window.innerWidth < 768) {
+                            this.isSidebarOpen = false;
+                            this.updateSidebarVisibility();
+                        }
+
+                    }, () => alert("Cần quyền truy cập vị trí để chỉ đường."));
+                } else {
+                    alert("Trình duyệt không hỗ trợ định vị.");
+                }
+            }
+
+            clearRoute() {
+                if (this.routingControl) {
+                    this.map.removeControl(this.routingControl);
+                    this.routingControl = null;
+                }
+                document.getElementById('btn-clear-route').classList.add('hidden');
             }
 
             // --- ACTIONS ---
@@ -197,29 +287,22 @@
             }
 
             handleMarkerClick(station) {
-                // setView sẽ tự động kẹp về maxZoom (12)
-                this.map.setView([station.location.lat, station.location.lng], 12);
+                this.map.setView([station.location.lat, station.location.lng], 16); 
                 this.setSidebarView('LIST');
                 if (!this.isSidebarOpen) this.toggleSidebar();
             }
 
             async saveStation(data) {
-                // 1. Save Local
                 this.stations.unshift(data);
                 this.saveData();
-                
-                // 2. UI Update
                 this.selectedLocation = null;
                 this.updateTempMarker();
                 this.renderMapMarkers();
                 this.setSidebarView('LIST');
                 
-                // 3. Sync to Google Sheet (if configured)
                 if (this.config.googleSheetScriptUrl) {
                     this.syncToSheet(data);
                 }
-
-                // 4. Sync to Custom API (AJAX)
                 if (this.config.customApiUrl) {
                     await this.syncToApi(data);
                 }
@@ -301,14 +384,21 @@
                                   <p class="text-xs text-gray-500 mb-1">${s.address}</p>
                                   <p class="text-xs text-blue-600 font-medium mb-2"><span class="text-gray-400 font-normal">Người nhập:</span> ${s.reporter || 'N/A'}</p>
                                 </div>
-                                <button onclick="event.stopPropagation(); app.deleteStation('${s.id}')" class="text-red-400 hover:text-red-600 p-1">
-                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                </button>
+                                <div class="flex flex-col gap-1">
+                                    <button onclick="event.stopPropagation(); app.deleteStation('${s.id}')" class="text-red-400 hover:text-red-600 p-1" title="Xóa">
+                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
                              </div>
                              ${s.images.length ? `<div class="flex gap-2 mb-2 overflow-x-auto pb-2 scrollbar-hide">
                                 ${s.images.map(img => `<img src="${img}" class="w-16 h-16 object-cover rounded flex-shrink-0" />`).join('')}
                              </div>` : ''}
                              <p class="text-sm text-gray-600 line-clamp-2 bg-gray-50 p-2 rounded">${s.description || 'Không có mô tả'}</p>
+                             
+                             <!-- Nút chỉ đường -->
+                             <button onclick="event.stopPropagation(); app.routeTo(${s.location.lat}, ${s.location.lng})" class="mt-2 w-full flex items-center justify-center gap-2 bg-green-50 text-green-700 py-1.5 rounded hover:bg-green-100 text-xs font-medium border border-green-200">
+                                <i data-lucide="navigation" class="w-3 h-3"></i> Chỉ đường đến đây
+                             </button>
                         </div>
                     `).join('');
 
@@ -349,6 +439,7 @@
                         <div>
                             <label class="block text-sm font-medium mb-1">Họ tên người nhập <span class="text-red-500">*</span></label>
                             <input type="text" id="inp-reporter" value="${lastReporter}" required class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nguyễn Văn A">
+                            <p class="text-[10px] text-gray-500 mt-1 italic">* Tên sẽ được tự động ghi nhớ cho lần sau.</p>
                         </div>
 
                         <div>
@@ -387,6 +478,12 @@
                 `;
 
                 // Logic for Form
+                const reporterInput = document.getElementById('inp-reporter');
+                // Lưu tên ngay khi gõ
+                reporterInput.oninput = (e) => {
+                    localStorage.setItem(STORE_KEY_LAST_REPORTER, e.target.value);
+                };
+
                 const images = [];
                 const renderImages = () => {
                     const div = document.getElementById('img-preview');
@@ -401,7 +498,6 @@
                     lucide.createIcons();
                 };
 
-                // Add method to form element to be callable globally via onclick trick (simple JS hack for single file)
                 document.getElementById('station-form').removeImage = (idx) => {
                     images.splice(idx, 1);
                     renderImages();
@@ -439,17 +535,16 @@
                 document.getElementById('station-form').onsubmit = (e) => {
                     e.preventDefault();
                     
-                    const reporterVal = document.getElementById('inp-reporter').value.trim();
+                    const reporterVal = reporterInput.value.trim();
                     const nameVal = document.getElementById('inp-name').value.trim();
                     const addressVal = document.getElementById('inp-address').value.trim();
                     const descVal = document.getElementById('inp-desc').value.trim();
                     
-                    // Double check (HTML required attribute should catch this, but safe to verify)
                     if (!reporterVal || !nameVal || !addressVal || !descVal) {
                         return alert("Vui lòng nhập đầy đủ các thông tin bắt buộc.");
                     }
 
-                    // Save reporter for next time
+                    // Đảm bảo lưu lần cuối
                     localStorage.setItem(STORE_KEY_LAST_REPORTER, reporterVal);
 
                     const data = {
@@ -513,31 +608,18 @@
             }
 
             // --- SERVICES ---
-            
-            // Hàm AJAX để lưu dữ liệu về API của bạn
             async syncToApi(station) {
                 const url = this.config.customApiUrl;
                 if (!url) return;
-
-                // Hiển thị thông báo nhỏ (console)
                 console.log("Đang gửi dữ liệu về API...", station);
-                
                 try {
                     const response = await fetch(url, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            // 'Authorization': 'Bearer ...' // Nếu bạn cần token thì thêm vào đây
-                        },
+                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(station)
                     });
-
-                    if (!response.ok) {
-                        throw new Error(`API trả về lỗi: ${response.status}`);
-                    }
-
+                    if (!response.ok) throw new Error(`API trả về lỗi: ${response.status}`);
                     console.log("Đã lưu thành công vào API riêng!");
-                    // Bạn có thể alert hoặc toast thông báo thành công nếu muốn
                 } catch (error) {
                     console.error("Lỗi khi gọi API:", error);
                     alert("Không thể lưu vào API: " + error.message);
@@ -546,26 +628,17 @@
 
             async callGemini(base64Images, location) {
                 if (!this.config.geminiApiKey) throw new Error("Chưa nhập Gemini API Key trong Cài đặt.");
-                
-                // Initialize Client (Client-side usage requires key from settings)
                 const ai = new GoogleGenAI({ apiKey: this.config.geminiApiKey });
-                
                 const parts = base64Images.map(img => ({
-                    inlineData: {
-                        mimeType: "image/jpeg",
-                        data: img.split("base64,")[1] || img
-                    }
+                    inlineData: { mimeType: "image/jpeg", data: img.split("base64,")[1] || img }
                 }));
-
                 parts.push({ 
                     text: `Hãy phân tích hình ảnh trạm/cơ sở hạ tầng tại tọa độ (${location.lat}, ${location.lng}). Mô tả ngắn gọn (dưới 100 từ) về tình trạng, thiết bị nhìn thấy và môi trường xung quanh.` 
                 });
-
                 const response = await ai.models.generateContent({
                     model: "gemini-2.5-flash-latest",
                     contents: { parts: parts }
                 });
-
                 return response.text();
             }
 
@@ -580,7 +653,6 @@
                     payload.append('lat', station.location.lat);
                     payload.append('lng', station.location.lng);
                     payload.append('description', station.description);
-                    
                     await fetch(url, { method: 'POST', mode: 'no-cors', body: payload });
                     console.log("Sent to sheet");
                 } catch (e) {
