@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.geostation",
+      "sha256_cert_fingerprints": [
+        "FA:C6:17:45:35:09:98:20:37:6C:20:97:54:13:3B:56:56:45:9F:80:6D:3E:04:88:94:0C:6D:5C:9A:88:51:30"
+      ]
+    }
+  }
+]
