@@ -63,6 +63,19 @@
     <div class="flex-1 relative h-full">
         <div id="map" class="w-full h-full bg-gray-200"></div>
 
+        <!-- Search Bar -->
+        <div class="absolute top-4 left-16 right-16 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-96 z-[400]">
+             <div class="relative shadow-lg rounded-full group">
+                <input type="text" id="search-input" 
+                       class="w-full pl-10 pr-4 py-3 rounded-full border-none focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white/95 backdrop-blur transition-colors"
+                       placeholder="Tìm địa chỉ, đường phố..."
+                       onkeydown="if(event.key === 'Enter') app.searchAddress(this.value)">
+                <div class="absolute left-3 top-3 text-gray-500">
+                    <i data-lucide="search" class="w-5 h-5"></i>
+                </div>
+            </div>
+        </div>
+
         <!-- Floating Buttons -->
         <div class="absolute top-4 right-4 flex flex-col gap-2 z-[400]">
             <button onclick="app.setSidebarView('SETTINGS')" class="bg-white p-3 rounded-full shadow-lg hover:bg-gray-100 text-gray-700 transition" title="Cài đặt">
@@ -90,7 +103,8 @@
         const STORE_KEY_DATA = 'geo_station_data_v1';
         const STORE_KEY_CONFIG = 'geo_station_config_v1';
         const STORE_KEY_LAST_REPORTER = 'geo_station_last_reporter';
-        const STORE_KEY_MAP_VIEW = 'geo_station_map_view'; // Key mới để lưu vị trí bản đồ
+        const STORE_KEY_MAP_VIEW = 'geo_station_map_view';
+        const STORE_KEY_REPORTERS = 'geo_station_reporters_v1'; // Key lưu danh sách người nhập
 
         class App {
             constructor() {
@@ -224,6 +238,48 @@
                         }).addTo(this.map).bindPopup("Vị trí của bạn").openPopup();
 
                     }, () => alert("Không thể lấy vị trí của bạn."));
+                }
+            }
+
+            // --- SEARCH FUNCTION ---
+            async searchAddress(query) {
+                if (!query) return;
+                const inp = document.getElementById('search-input');
+                const originalPlaceholder = inp.placeholder;
+                
+                // Visual feedback
+                inp.disabled = true;
+                inp.classList.add('bg-gray-100');
+                
+                try {
+                    // Nominatim OpenStreetMap Search API
+                    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`);
+                    const data = await response.json();
+                    
+                    if (data && data.length > 0) {
+                        const result = data[0];
+                        const lat = parseFloat(result.lat);
+                        const lng = parseFloat(result.lon);
+                        
+                        // Fly to location
+                        this.map.setView([lat, lng], 16);
+                        
+                        // Show result name in popup
+                        L.popup()
+                            .setLatLng([lat, lng])
+                            .setContent(`<div class="font-medium text-sm text-center">${result.display_name}</div>`)
+                            .openOn(this.map);
+                            
+                    } else {
+                        alert("Không tìm thấy địa chỉ này.");
+                    }
+                } catch (error) {
+                    console.error("Search error:", error);
+                    alert("Lỗi kết nối khi tìm kiếm.");
+                } finally {
+                    inp.disabled = false;
+                    inp.classList.remove('bg-gray-100');
+                    inp.focus();
                 }
             }
 
@@ -417,8 +473,22 @@
 
             // HTML Generator: FORM
             renderFormView(container) {
-                // Lấy tên người nhập lần trước
+                // 1. Chuẩn bị dữ liệu danh sách người nhập
                 const lastReporter = localStorage.getItem(STORE_KEY_LAST_REPORTER) || '';
+                let reporters = JSON.parse(localStorage.getItem(STORE_KEY_REPORTERS) || '[]');
+                
+                // Đảm bảo tên người nhập cuối cùng (nếu có) luôn nằm trong danh sách
+                if (lastReporter && !reporters.includes(lastReporter)) {
+                    reporters.push(lastReporter);
+                    localStorage.setItem(STORE_KEY_REPORTERS, JSON.stringify(reporters));
+                }
+                
+                // Sắp xếp danh sách
+                reporters.sort();
+
+                const optionsHtml = reporters.map(r => 
+                    `<option value="${r}" ${r === lastReporter ? 'selected' : ''}>${r}</option>`
+                ).join('');
 
                 // Template
                 container.innerHTML = `
@@ -438,8 +508,14 @@
                         
                         <div>
                             <label class="block text-sm font-medium mb-1">Họ tên người nhập <span class="text-red-500">*</span></label>
-                            <input type="text" id="inp-reporter" value="${lastReporter}" required class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nguyễn Văn A">
-                            <p class="text-[10px] text-gray-500 mt-1 italic">* Tên sẽ được tự động ghi nhớ cho lần sau.</p>
+                            <div class="flex flex-col gap-2">
+                                <select id="sel-reporter" class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                                    <option value="">-- Chọn người nhập --</option>
+                                    ${optionsHtml}
+                                    <option value="__NEW__" class="text-blue-600 font-semibold">+ Nhập tên mới...</option>
+                                </select>
+                                <input type="text" id="inp-reporter-new" class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none hidden" placeholder="Nhập tên người mới...">
+                            </div>
                         </div>
 
                         <div>
@@ -478,10 +554,21 @@
                 `;
 
                 // Logic for Form
-                const reporterInput = document.getElementById('inp-reporter');
-                // Lưu tên ngay khi gõ
-                reporterInput.oninput = (e) => {
-                    localStorage.setItem(STORE_KEY_LAST_REPORTER, e.target.value);
+                const selReporter = document.getElementById('sel-reporter');
+                const inpReporterNew = document.getElementById('inp-reporter-new');
+
+                // Xử lý khi đổi lựa chọn
+                selReporter.onchange = (e) => {
+                    if (e.target.value === '__NEW__') {
+                        inpReporterNew.classList.remove('hidden');
+                        inpReporterNew.focus();
+                    } else {
+                        inpReporterNew.classList.add('hidden');
+                        // Lưu ngay vào "cookies" (localStorage) nếu chọn tên có sẵn
+                        if (e.target.value) {
+                            localStorage.setItem(STORE_KEY_LAST_REPORTER, e.target.value);
+                        }
+                    }
                 };
 
                 const images = [];
@@ -535,7 +622,13 @@
                 document.getElementById('station-form').onsubmit = (e) => {
                     e.preventDefault();
                     
-                    const reporterVal = reporterInput.value.trim();
+                    let reporterVal = selReporter.value;
+                    
+                    // Nếu chọn nhập mới, lấy giá trị từ ô input
+                    if (reporterVal === '__NEW__') {
+                         reporterVal = inpReporterNew.value.trim();
+                    }
+
                     const nameVal = document.getElementById('inp-name').value.trim();
                     const addressVal = document.getElementById('inp-address').value.trim();
                     const descVal = document.getElementById('inp-desc').value.trim();
@@ -544,7 +637,13 @@
                         return alert("Vui lòng nhập đầy đủ các thông tin bắt buộc.");
                     }
 
-                    // Đảm bảo lưu lần cuối
+                    // Lưu tên mới vào danh sách nếu chưa có
+                    if (!reporters.includes(reporterVal)) {
+                        reporters.push(reporterVal);
+                        localStorage.setItem(STORE_KEY_REPORTERS, JSON.stringify(reporters));
+                    }
+                    
+                    // Cập nhật người nhập cuối cùng
                     localStorage.setItem(STORE_KEY_LAST_REPORTER, reporterVal);
 
                     const data = {
