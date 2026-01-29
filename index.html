@@ -76,7 +76,16 @@
         class App {
             constructor() {
                 this.stations = JSON.parse(localStorage.getItem(STORE_KEY_DATA) || '[]');
-                this.config = JSON.parse(localStorage.getItem(STORE_KEY_CONFIG) || '{"googleMapsApiKey": "", "googleSheetScriptUrl": ""}');
+                // Load config or default empty object
+                this.config = JSON.parse(localStorage.getItem(STORE_KEY_CONFIG) || '{}');
+                
+                // Ensure default structure
+                this.config = {
+                    googleMapsApiKey: this.config.googleMapsApiKey || "",
+                    googleSheetScriptUrl: this.config.googleSheetScriptUrl || "",
+                    geminiApiKey: this.config.geminiApiKey || "",
+                    customApiUrl: this.config.customApiUrl || "" // New field for Custom API
+                };
                 
                 this.view = 'LIST'; // LIST, FORM, SETTINGS
                 this.selectedLocation = null;
@@ -86,7 +95,6 @@
                 this.map = null;
                 this.markers = [];
                 this.tempMarker = null;
-                this.googleMap = null; // Placeholder for Google Maps logic if needed later
                 
                 this.init();
             }
@@ -100,9 +108,9 @@
 
             // --- MAP LOGIC (Leaflet Default) ---
             initMap() {
-                // Default Hanoi
-                const startLat = 21.0285;
-                const startLng = 105.8542;
+                // Default Ho Chi Minh City (HCM)
+                const startLat = 10.7769;
+                const startLng = 106.7009;
 
                 this.map = L.map('map', { zoomControl: false }).setView([startLat, startLng], 12);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -184,21 +192,28 @@
             handleMarkerClick(station) {
                 this.map.setView([station.location.lat, station.location.lng], 16);
                 this.setSidebarView('LIST');
-                // Scroll to item? (Advanced: implement later)
                 if (!this.isSidebarOpen) this.toggleSidebar();
             }
 
-            saveStation(data) {
+            async saveStation(data) {
+                // 1. Save Local
                 this.stations.unshift(data);
                 this.saveData();
+                
+                // 2. UI Update
                 this.selectedLocation = null;
                 this.updateTempMarker();
                 this.renderMapMarkers();
                 this.setSidebarView('LIST');
                 
-                // Sync to Sheet if configured
+                // 3. Sync to Google Sheet (if configured)
                 if (this.config.googleSheetScriptUrl) {
                     this.syncToSheet(data);
+                }
+
+                // 4. Sync to Custom API (AJAX)
+                if (this.config.customApiUrl) {
+                    await this.syncToApi(data);
                 }
             }
 
@@ -429,20 +444,24 @@
                         </div>
                         <form id="settings-form" class="space-y-6">
                             <div>
-                                <label class="block text-sm font-medium mb-1">Google Maps API Key</label>
-                                <input type="password" id="cfg-key" value="${this.config.googleMapsApiKey || ''}" class="w-full border p-2 rounded" placeholder="AIzaSy...">
-                                <p class="text-xs text-gray-500 mt-1">Để trống nếu dùng bản đồ miễn phí (OpenStreetMap).</p>
+                                <label class="block text-sm font-medium mb-1">Custom API URL (AJAX)</label>
+                                <input type="text" id="cfg-api" value="${this.config.customApiUrl || ''}" class="w-full border p-2 rounded" placeholder="https://api.domain.com/save-station">
+                                <p class="text-xs text-gray-500 mt-1">Hệ thống sẽ POST dữ liệu dạng JSON về URL này.</p>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium mb-1">Google Apps Script URL</label>
-                                <input type="text" id="cfg-script" value="${this.config.googleSheetScriptUrl || ''}" class="w-full border p-2 rounded" placeholder="https://script.google.com/...">
-                                <p class="text-xs text-gray-500 mt-1">Dùng để lưu data về Google Sheets.</p>
-                            </div>
-                             <div>
                                 <label class="block text-sm font-medium mb-1">Gemini API Key</label>
                                 <input type="password" id="cfg-gemini" value="${this.config.geminiApiKey || ''}" class="w-full border p-2 rounded" placeholder="AIzaSy...">
                                 <p class="text-xs text-gray-500 mt-1">Cần thiết để dùng tính năng AI tạo mô tả ảnh.</p>
                             </div>
+                            
+                             <div class="pt-4 border-t">
+                                <label class="block text-sm font-medium mb-1 text-gray-500">Tùy chọn khác (Ít dùng)</label>
+                                <div class="space-y-3">
+                                    <input type="text" id="cfg-script" value="${this.config.googleSheetScriptUrl || ''}" class="w-full border p-2 rounded text-sm" placeholder="Google Apps Script URL (Tùy chọn)">
+                                    <input type="password" id="cfg-key" value="${this.config.googleMapsApiKey || ''}" class="w-full border p-2 rounded text-sm" placeholder="Google Maps API Key (Để trống dùng OSM)">
+                                </div>
+                            </div>
+
                             <button type="submit" class="w-full bg-black text-white py-2 rounded flex justify-center gap-2">
                                 <i data-lucide="save" class="w-4 h-4"></i> Lưu Cài đặt
                             </button>
@@ -453,15 +472,46 @@
                 document.getElementById('settings-form').onsubmit = (e) => {
                     e.preventDefault();
                     this.saveConfig({
-                        googleMapsApiKey: document.getElementById('cfg-key').value,
+                        customApiUrl: document.getElementById('cfg-api').value,
+                        geminiApiKey: document.getElementById('cfg-gemini').value,
                         googleSheetScriptUrl: document.getElementById('cfg-script').value,
-                        geminiApiKey: document.getElementById('cfg-gemini').value
+                        googleMapsApiKey: document.getElementById('cfg-key').value
                     });
                 };
             }
 
             // --- SERVICES ---
             
+            // Hàm AJAX để lưu dữ liệu về API của bạn
+            async syncToApi(station) {
+                const url = this.config.customApiUrl;
+                if (!url) return;
+
+                // Hiển thị thông báo nhỏ (console)
+                console.log("Đang gửi dữ liệu về API...", station);
+                
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            // 'Authorization': 'Bearer ...' // Nếu bạn cần token thì thêm vào đây
+                        },
+                        body: JSON.stringify(station)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`API trả về lỗi: ${response.status}`);
+                    }
+
+                    console.log("Đã lưu thành công vào API riêng!");
+                    // Bạn có thể alert hoặc toast thông báo thành công nếu muốn
+                } catch (error) {
+                    console.error("Lỗi khi gọi API:", error);
+                    alert("Không thể lưu vào API: " + error.message);
+                }
+            }
+
             async callGemini(base64Images, location) {
                 if (!this.config.geminiApiKey) throw new Error("Chưa nhập Gemini API Key trong Cài đặt.");
                 
