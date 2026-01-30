@@ -90,7 +90,7 @@
             <button onclick="app.setSidebarView('SETTINGS')" class="bg-white p-3 rounded-full shadow-lg hover:bg-gray-100 text-gray-700 transition" title="Cài đặt">
                 <i data-lucide="settings" class="w-6 h-6"></i>
             </button>
-            <button onclick="app.locateMe()" class="bg-blue-600 p-3 rounded-full shadow-lg hover:bg-blue-700 text-white transition" title="Vị trí của tôi (Thêm trạm)">
+            <button id="btn-locate" onclick="app.locateMe()" class="bg-blue-600 p-3 rounded-full shadow-lg hover:bg-blue-700 text-white transition" title="Vị trí của tôi (Thêm trạm)">
                 <i data-lucide="locate" class="w-6 h-6"></i>
             </button>
             <!-- Nút Toggle Search mới -->
@@ -151,6 +151,7 @@
                 this.map = null;
                 this.markers = [];
                 this.tempMarker = null;
+                this.accuracyCircle = null; // Vòng tròn hiển thị sai số
                 this.routingControl = null; // Biến lưu control chỉ đường
                 
                 this.init();
@@ -234,6 +235,10 @@
                     this.map.removeLayer(this.tempMarker);
                     this.tempMarker = null;
                 }
+                if (this.accuracyCircle) {
+                    this.map.removeLayer(this.accuracyCircle);
+                    this.accuracyCircle = null;
+                }
 
                 if (this.selectedLocation) {
                     const redIcon = L.icon({
@@ -244,6 +249,18 @@
                         popupAnchor: [1, -34],
                         shadowSize: [41, 41]
                     });
+
+                    // Vẽ vòng tròn sai số nếu có dữ liệu GPS
+                    if (this.selectedLocation.accuracy && this.selectedLocation.accuracy > 0) {
+                        this.accuracyCircle = L.circle([this.selectedLocation.lat, this.selectedLocation.lng], {
+                            radius: this.selectedLocation.accuracy,
+                            color: '#3b82f6',
+                            fillColor: '#3b82f6',
+                            fillOpacity: 0.1,
+                            weight: 1,
+                            dashArray: '5, 5'
+                        }).addTo(this.map);
+                    }
 
                     // Cho phép draggable (kéo thả)
                     this.tempMarker = L.marker([this.selectedLocation.lat, this.selectedLocation.lng], { 
@@ -258,7 +275,14 @@
                     // Sự kiện khi kéo xong marker
                     this.tempMarker.on('dragend', (event) => {
                         const position = event.target.getLatLng();
-                        // Khi kéo tay, sai số GPS không còn đúng nữa -> set null (Thủ công)
+                        
+                        // Khi kéo tay, sai số GPS cũ không còn ý nghĩa -> Xóa vòng tròn sai số
+                        if (this.accuracyCircle) {
+                            this.map.removeLayer(this.accuracyCircle);
+                            this.accuracyCircle = null;
+                        }
+
+                        // Set accuracy = null (Thủ công)
                         this.selectedLocation = { lat: position.lat, lng: position.lng, accuracy: null };
                         
                         // Cập nhật tọa độ trên Form nếu đang mở
@@ -280,29 +304,75 @@
 
             locateMe() {
                 if (navigator.geolocation) {
+                    // UI Feedback: Đổi icon thành loading
+                    const btn = document.getElementById('btn-locate');
+                    const originalContent = btn.innerHTML;
+                    btn.innerHTML = '<i data-lucide="loader-2" class="w-6 h-6 animate-spin"></i>';
+                    lucide.createIcons();
+
                     const options = {
                         enableHighAccuracy: true,
                         timeout: 10000,
-                        maximumAge: 0
+                        maximumAge: 0 // Bắt buộc lấy mới, không dùng cache
                     };
 
-                    navigator.geolocation.getCurrentPosition(pos => {
-                        const loc = { 
-                            lat: pos.coords.latitude, 
-                            lng: pos.coords.longitude,
-                            accuracy: pos.coords.accuracy // Lấy sai số (mét)
-                        };
-                        
-                        // Thay vì chỉ hiện popup, kích hoạt ngay chế độ Thêm trạm tại vị trí này
-                        this.handleMapClick(loc);
-                        
-                        // Fly to location
-                        this.map.setView([loc.lat, loc.lng], 18);
+                    let watchId = null;
+                    let bestPosition = null;
 
-                    }, (err) => {
-                        console.error(err);
-                        alert("Không thể lấy vị trí của bạn (Lỗi: " + err.code + "). Hãy kiểm tra quyền GPS.");
-                    }, options);
+                    // Hàm hoàn tất
+                    const finish = (pos) => {
+                        if (watchId !== null) {
+                            navigator.geolocation.clearWatch(watchId);
+                            watchId = null;
+                        }
+                        btn.innerHTML = originalContent;
+                        lucide.createIcons();
+
+                        if (pos) {
+                            const loc = { 
+                                lat: pos.coords.latitude, 
+                                lng: pos.coords.longitude,
+                                accuracy: pos.coords.accuracy 
+                            };
+                            this.handleMapClick(loc);
+                            // Zoom vừa đủ để thấy cả sai số nếu sai số lớn, hoặc zoom 18 nếu sai số nhỏ
+                            if (loc.accuracy > 100) {
+                                this.map.flyTo([loc.lat, loc.lng], 16);
+                            } else {
+                                this.map.flyTo([loc.lat, loc.lng], 18);
+                            }
+                        } else {
+                            alert("Không thể lấy vị trí chính xác. Vui lòng kiểm tra GPS.");
+                        }
+                    };
+
+                    // Sử dụng watchPosition để "warm-up" GPS
+                    watchId = navigator.geolocation.watchPosition(
+                        (pos) => {
+                            // Lưu vị trí tốt nhất tìm được
+                            if (!bestPosition || pos.coords.accuracy < bestPosition.coords.accuracy) {
+                                bestPosition = pos;
+                            }
+
+                            // Nếu sai số < 20m, chấp nhận ngay
+                            if (pos.coords.accuracy <= 20) {
+                                finish(pos);
+                            }
+                        },
+                        (err) => {
+                            console.warn("GPS Error:", err);
+                            // Nếu lỗi, vẫn thử chờ timeout xem có dữ liệu cũ không, hoặc kết thúc
+                        },
+                        options
+                    );
+
+                    // Timeout sau 5 giây: Lấy kết quả tốt nhất hiện có
+                    setTimeout(() => {
+                        if (watchId !== null) {
+                            finish(bestPosition);
+                        }
+                    }, 5000);
+
                 } else {
                     alert("Trình duyệt không hỗ trợ định vị.");
                 }
