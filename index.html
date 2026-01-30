@@ -90,7 +90,7 @@
             <button onclick="app.setSidebarView('SETTINGS')" class="bg-white p-3 rounded-full shadow-lg hover:bg-gray-100 text-gray-700 transition" title="Cài đặt">
                 <i data-lucide="settings" class="w-6 h-6"></i>
             </button>
-            <button onclick="app.locateMe()" class="bg-blue-600 p-3 rounded-full shadow-lg hover:bg-blue-700 text-white transition" title="Vị trí của tôi">
+            <button onclick="app.locateMe()" class="bg-blue-600 p-3 rounded-full shadow-lg hover:bg-blue-700 text-white transition" title="Vị trí của tôi (Thêm trạm)">
                 <i data-lucide="locate" class="w-6 h-6"></i>
             </button>
             <!-- Nút Toggle Search mới -->
@@ -198,8 +198,8 @@
 
                 // Click Event
                 this.map.on('click', (e) => {
-                    // Nếu đang có tuyến đường thì không mở form, hoặc tùy logic
-                    this.handleMapClick({ lat: e.latlng.lat, lng: e.latlng.lng });
+                    // Nếu click thủ công, sai số là null/undefined hoặc coi như thủ công
+                    this.handleMapClick({ lat: e.latlng.lat, lng: e.latlng.lng, accuracy: null });
                 });
 
                 this.renderMapMarkers();
@@ -258,14 +258,21 @@
                     // Sự kiện khi kéo xong marker
                     this.tempMarker.on('dragend', (event) => {
                         const position = event.target.getLatLng();
-                        this.selectedLocation = { lat: position.lat, lng: position.lng };
+                        // Khi kéo tay, sai số GPS không còn đúng nữa -> set null (Thủ công)
+                        this.selectedLocation = { lat: position.lat, lng: position.lng, accuracy: null };
                         
                         // Cập nhật tọa độ trên Form nếu đang mở
                         const latEl = document.getElementById('disp-lat');
                         const lngEl = document.getElementById('disp-lng');
+                        const accEl = document.getElementById('disp-acc');
+                        
                         if (latEl && lngEl) {
                             latEl.innerText = `Lat: ${position.lat.toFixed(5)}`;
                             lngEl.innerText = `Lng: ${position.lng.toFixed(5)}`;
+                        }
+                        if (accEl) {
+                            accEl.innerText = `Sai số: Thủ công`;
+                            accEl.className = 'text-orange-600 font-medium';
                         }
                     });
                 }
@@ -273,16 +280,31 @@
 
             locateMe() {
                 if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition(pos => {
-                        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                        this.map.setView([loc.lat, loc.lng], 16);
-                        
-                        // Tạo hiệu ứng marker tại vị trí tôi
-                        L.circleMarker([loc.lat, loc.lng], {
-                            radius: 6, color: 'white', fillColor: 'green', fillOpacity: 1
-                        }).addTo(this.map).bindPopup("Vị trí của bạn").openPopup();
+                    const options = {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 0
+                    };
 
-                    }, () => alert("Không thể lấy vị trí của bạn."));
+                    navigator.geolocation.getCurrentPosition(pos => {
+                        const loc = { 
+                            lat: pos.coords.latitude, 
+                            lng: pos.coords.longitude,
+                            accuracy: pos.coords.accuracy // Lấy sai số (mét)
+                        };
+                        
+                        // Thay vì chỉ hiện popup, kích hoạt ngay chế độ Thêm trạm tại vị trí này
+                        this.handleMapClick(loc);
+                        
+                        // Fly to location
+                        this.map.setView([loc.lat, loc.lng], 18);
+
+                    }, (err) => {
+                        console.error(err);
+                        alert("Không thể lấy vị trí của bạn (Lỗi: " + err.code + "). Hãy kiểm tra quyền GPS.");
+                    }, options);
+                } else {
+                    alert("Trình duyệt không hỗ trợ định vị.");
                 }
             }
 
@@ -489,7 +511,8 @@
                 const filteredStations = this.stations.filter(s => {
                     const name = (s.name || '').toLowerCase();
                     const reporter = (s.reporter || '').toLowerCase();
-                    return name.includes(query) || reporter.includes(query);
+                    const code = (s.code || '').toLowerCase();
+                    return name.includes(query) || reporter.includes(query) || code.includes(query);
                 });
 
                 if (filteredStations.length === 0) {
@@ -497,7 +520,7 @@
                         return `<div class="text-center text-gray-400 mt-10 p-4">
                             <i data-lucide="map-pin" class="w-10 h-10 mx-auto opacity-50 mb-2"></i>
                             <p>Chưa có dữ liệu.</p>
-                            <p class="text-sm">Bấm vào bản đồ để thêm trạm mới.</p>
+                            <p class="text-sm">Bấm định vị hoặc vào bản đồ để thêm trạm mới.</p>
                         </div>`;
                      }
                      return `<div class="text-center text-gray-400 mt-10 p-4">
@@ -511,6 +534,7 @@
                              <div class="flex justify-between items-start">
                                 <div>
                                   <h3 class="font-semibold text-gray-900">${s.name}</h3>
+                                  ${s.code ? `<p class="text-xs text-indigo-600 font-mono mb-0.5">Mã: ${s.code}</p>` : ''}
                                   <p class="text-xs text-gray-500 mb-1">${s.address}</p>
                                   <p class="text-xs text-blue-600 font-medium mb-2"><span class="text-gray-400 font-normal">Người nhập:</span> ${s.reporter || 'N/A'}</p>
                                 </div>
@@ -524,6 +548,7 @@
                                 ${s.images.map(img => `<img src="${img}" class="w-16 h-16 object-cover rounded flex-shrink-0" />`).join('')}
                              </div>` : ''}
                              <p class="text-sm text-gray-600 line-clamp-2 bg-gray-50 p-2 rounded">${s.description || 'Không có mô tả'}</p>
+                             ${s.location.accuracy ? `<p class="text-[10px] text-gray-400 mt-1 text-right">Sai số GPS: ±${Math.round(s.location.accuracy)}m</p>` : ''}
                              
                              <!-- Nút chỉ đường -->
                              <button onclick="event.stopPropagation(); app.routeTo(${s.location.lat}, ${s.location.lng})" class="mt-2 w-full flex items-center justify-center gap-2 bg-green-50 text-green-700 py-1.5 rounded hover:bg-green-100 text-xs font-medium border border-green-200">
@@ -563,7 +588,7 @@
                             <input type="text" 
                                 value="${this.listFilterQuery || ''}"
                                 oninput="app.setListFilter(this.value)"
-                                placeholder="Lọc theo tên trạm hoặc người nhập..." 
+                                placeholder="Tìm theo tên, mã trạm..." 
                                 class="w-full pl-9 pr-3 py-2 rounded border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white">
                             <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-2.5"></i>
                         </div>
@@ -593,6 +618,15 @@
                     `<option value="${r}" ${r === lastReporter ? 'selected' : ''}>${r}</option>`
                 ).join('');
 
+                // Format accuracy
+                const accuracy = this.selectedLocation.accuracy;
+                let accText = 'Thủ công';
+                let accClass = 'text-orange-600 font-medium';
+                if (accuracy !== null && accuracy !== undefined) {
+                    accText = `±${Math.round(accuracy)} mét`;
+                    accClass = 'text-green-600 font-bold';
+                }
+
                 // Template
                 container.innerHTML = `
                     <div class="p-4 border-b flex justify-between items-center bg-blue-600 text-white">
@@ -604,9 +638,10 @@
                         </button>
                     </div>
                     <form id="station-form" class="p-5 space-y-4 flex-1 overflow-y-auto">
-                        <div class="bg-gray-50 p-2 rounded text-xs text-gray-600 flex justify-between">
+                        <div class="bg-gray-50 p-2 rounded text-xs text-gray-600 grid grid-cols-2 gap-2">
                             <span id="disp-lat">Lat: ${this.selectedLocation.lat.toFixed(5)}</span>
                             <span id="disp-lng">Lng: ${this.selectedLocation.lng.toFixed(5)}</span>
+                            <span class="col-span-2 border-t pt-1 mt-1">Sai số: <span id="disp-acc" class="${accClass}">${accText}</span></span>
                         </div>
                         
                         <div>
@@ -621,9 +656,15 @@
                             </div>
                         </div>
 
-                        <div>
-                            <label class="block text-sm font-medium mb-1">Tên trạm <span class="text-red-500">*</span></label>
-                            <input type="text" id="inp-name" required class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ví dụ: Trạm Biến áp A">
+                        <div class="grid grid-cols-3 gap-3">
+                             <div class="col-span-1">
+                                <label class="block text-sm font-medium mb-1">Mã trạm</label>
+                                <input type="text" id="inp-code" class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none uppercase font-mono" placeholder="T01">
+                             </div>
+                             <div class="col-span-2">
+                                <label class="block text-sm font-medium mb-1">Tên trạm <span class="text-red-500">*</span></label>
+                                <input type="text" id="inp-name" required class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Ví dụ: Trạm Biến áp A">
+                             </div>
                         </div>
 
                         <div>
@@ -749,6 +790,7 @@
                     }
 
                     const nameVal = document.getElementById('inp-name').value.trim();
+                    const codeVal = document.getElementById('inp-code').value.trim().toUpperCase();
                     const addressVal = document.getElementById('inp-address').value.trim();
                     const descVal = document.getElementById('inp-desc').value.trim();
                     
@@ -767,6 +809,7 @@
 
                     const data = {
                         id: crypto.randomUUID(),
+                        code: codeVal,
                         reporter: reporterVal,
                         name: nameVal,
                         address: addressVal,
@@ -851,7 +894,7 @@
                     inlineData: { mimeType: "image/jpeg", data: img.split("base64,")[1] || img }
                 }));
                 parts.push({ 
-                    text: `Hãy phân tích hình ảnh trạm/cơ sở hạ tầng tại tọa độ (${location.lat}, ${location.lng}). Mô tả ngắn gọn (dưới 100 từ) về tình trạng, thiết bị nhìn thấy và môi trường xung quanh.` 
+                    text: `Hãy phân tích hình ảnh trạm/cơ sở hạ tầng tại tọa độ (${location.lat}, ${location.lng}). Mã trạm nếu có. Mô tả ngắn gọn (dưới 100 từ) về tình trạng, thiết bị nhìn thấy và môi trường xung quanh.` 
                 });
                 const response = await ai.models.generateContent({
                     model: "gemini-2.5-flash-latest",
@@ -865,11 +908,13 @@
                 try {
                     const payload = new FormData();
                     payload.append('id', station.id);
+                    payload.append('code', station.code || '');
                     payload.append('reporter', station.reporter || '');
                     payload.append('name', station.name);
                     payload.append('address', station.address);
                     payload.append('lat', station.location.lat);
                     payload.append('lng', station.location.lng);
+                    payload.append('accuracy', station.location.accuracy || '');
                     payload.append('description', station.description);
                     await fetch(url, { method: 'POST', mode: 'no-cors', body: payload });
                     console.log("Sent to sheet");
@@ -879,14 +924,16 @@
             }
 
             exportCSV() {
-                const headers = ['ID,Reporter,Name,Address,Lat,Lng,Description,Timestamp'];
+                const headers = ['ID,Code,Reporter,Name,Address,Lat,Lng,Accuracy(m),Description,Timestamp'];
                 const rows = this.stations.map(s => [
                     s.id,
+                    `"${(s.code || '').replace(/"/g, '""')}"`,
                     `"${(s.reporter || '').replace(/"/g, '""')}"`,
                     `"${s.name.replace(/"/g, '""')}"`,
                     `"${s.address.replace(/"/g, '""')}"`,
                     s.location.lat,
                     s.location.lng,
+                    s.location.accuracy || '',
                     `"${s.description.replace(/"/g, '""')}"`,
                     new Date(s.timestamp).toISOString()
                 ].join(','));
